@@ -1,0 +1,114 @@
+---
+title: "Prediction_PML"
+author: "Ahmad Hasrul bin Hussin"
+date: "2025-01-30"
+output: html_document
+---
+
+## Load pacakges
+```{r,warning=FALSE}
+library(caret)
+library(dplyr)
+
+```
+
+## Import data
+```{r,warning=FALSE}
+training_set <- read.csv("C:/Users/chaoh/Desktop/TEMP/PML/Prediction_PML/Practical-Machine-Learning-Project/pml-training.csv")
+testing_set <-read.csv("C:/Users/chaoh/Desktop/TEMP/PML/Prediction_PML/Practical-Machine-Learning-Project/pml-testing.csv")
+```
+
+
+
+## Find missingness in the data 
+```{r}
+#preview structure
+str(training_set) #preview structure
+
+#find data missing rate for all variables
+missing_values <- data.frame(
+  Variable = names(training_set),
+  Missing_Count = sapply(training_set, function(x) sum(is.na(x))),
+  Percentage = sapply(training_set, function(x) mean(is.na(x)) * 100)
+)
+print(missing_values)
+```
+
+According the results above, the variables either have no missing values or have 
+more than 90% missing rate. 
+
+## Remove variables with >90% missingness
+```{r}
+missing_percentage <- sapply(training_set, function(x) mean(is.na(x))*100)
+training_set_clean <- training_set[, missing_percentage <= 90]
+```
+
+## Remove variables with near 0 variance
+```{r}
+nzv <- nearZeroVar(training_set_clean, saveMetrics = TRUE)
+training_set_clean <- training_set_clean[,nzv$nzv==FALSE]
+```
+
+## Remove variables that are irrelevant to prediction
+```{r}
+training_set_clean <- training_set_clean %>%
+  select(-X, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, 
+         -cvtd_timestamp, -num_window)
+training_set_clean$classe <- as.factor(training_set_clean$classe)
+```
+
+## Split the training set
+```{r}
+set.seed(888)
+inTrain<-createDataPartition(y=training_set_clean$classe, p=0.70, list=FALSE)
+training<-training_set_clean[inTrain,]
+testing<-training_set_clean[-inTrain,]
+```
+
+Since the variable to be predicted is categorical, we will choose a final algorithm  
+between random forest and boosting with trees. 
+
+## Fit model with random forest and make prediction on testing set 
+```{r}
+set.seed(888)
+modfit_rf<-train(classe~.,method="rf", ntree=100, data=training) #limit number of trees to 100 to reduce computing time
+
+prediction_rf <- predict(modfit_rf, testing)
+#Assess performance
+confusionMatrix(prediction_rf, testing$classe) 
+
+#Plot variable importance
+importance<-varImp(modfit_rf,scale=FALSE) 
+plot(importance)
+```
+
+## Fit model with boosting with trees and make prediction on testing set 
+```{r}
+set.seed(888)
+#Reduce hyperparameter search space to reduce computing time
+tuneGrid <- expand.grid(
+  n.trees = c(50, 100, 150),  
+  interaction.depth = c(3, 5),  
+  shrinkage = c(0.1),  
+  n.minobsinnode = 10
+)
+#Reduce cross-validation folds to reduce computing time
+control <- trainControl(method = "cv", number = 3) 
+
+modfit_gbm<-train(classe~.,method="gbm", data=training, trControl = control, 
+                  tuneGrid = tuneGrid, verbose=FALSE)
+
+prediction_gbm <- predict(modfit_gbm, testing)
+#Assess performance
+confusionMatrix(prediction_gbm, testing$classe) 
+```
+
+Based on the results above, the model with random forest(99.27%) is more accurate than
+the model with boosting trees(98.15%). 
+
+
+## Use the model with random forest for final prediction
+```{r}
+final_pred<-predict(modfit_rf,testing_set)
+final_pred
+```
